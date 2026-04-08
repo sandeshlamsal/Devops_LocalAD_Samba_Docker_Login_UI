@@ -556,6 +556,104 @@ This project only uses **port 389** (plain LDAP). Port 636 (LDAPS) is exposed in
 
 ---
 
+## Known Bugs & Fixes
+
+This section records every bug found during bring-up, its root cause, and the fix applied. It serves as a reference if the same issue appears again or in a different environment.
+
+---
+
+### BUG-001 — `http://corp.localhost` returns 502 Bad Gateway
+
+| Field | Detail |
+|-------|--------|
+| **Symptom** | Browser / curl returns `502 Bad Gateway` from `nginx/1.27.5` |
+| **Environment** | macOS + Colima + k3d |
+| **Root cause** | A local Homebrew nginx (`/usr/local/opt/nginx/bin/nginx`) was already listening on port 80 of the macOS host. The k3d cluster was created with `--port '80:80@loadbalancer'`, so both competed for port 80. Every request hit the Homebrew nginx first and got proxied nowhere (502). |
+| **Fix** | Deleted and recreated the k3d cluster with `--port '8080:80@loadbalancer'` instead, mapping host port **8080** to Traefik's loadbalancer. App is now accessible at `http://corp.localhost:8080`. |
+| **Files changed** | `scripts/setup-cluster.sh`, `scripts/build-and-import.sh`, `scripts/deploy.sh` |
+| **Commit** | `b9c97e4` |
+
+---
+
+### BUG-002 — Samba pod crashes on restart: `Can't load /etc/samba/smb.conf`
+
+| Field | Detail |
+|-------|--------|
+| **Symptom** | After pod restarts (image rebuild, `kubectl delete pod`), Samba enters `CrashLoopBackOff` with `samba - Failed to load config file!` |
+| **Environment** | Kubernetes StatefulSet with PVC |
+| **Root cause** | `samba-tool domain provision` writes `smb.conf` to `/etc/samba/` inside the container filesystem. This path is **not** on the PVC (`/var/lib/samba`). When the pod restarts the container gets a fresh filesystem, `/etc/samba/smb.conf` is gone, but the provision flag on the PVC causes the entrypoint to skip re-provisioning. Samba starts with no config and crashes. |
+| **Fix** | After provisioning, the entrypoint copies `smb.conf` to `/var/lib/samba/smb.conf.bak` (on the PVC). On every subsequent boot the `restore_config()` function copies it back to `/etc/samba/smb.conf` before starting Samba. |
+| **Files changed** | `docker/samba/entrypoint.sh` |
+| **Commit** | `b9c97e4` |
+
+---
+
+### BUG-003 — Login fails: `Strong Auth Required`
+
+| Field | Detail |
+|-------|--------|
+| **Symptom** | `POST /api/auth/login` returns `"Authentication service unavailable"`; backend logs show `Strong Auth Required` |
+| **Environment** | Node.js backend → ldapjs v3 → Samba AD |
+| **Root cause** | Samba 4 defaults `ldap server require strong auth = yes`, which forces LDAP clients to sign their requests using SASL/GSSAPI. `ldapjs` uses a plain simple bind (no signing), so Samba rejects every connection with error code `strongAuthRequired`. |
+| **Fix** | Added `ldap server require strong auth = no` to the `[global]` section of `smb.conf` via `sed` immediately after `domain provision` runs. This allows plain LDAP binds from non-Windows clients. |
+| **Files changed** | `docker/samba/entrypoint.sh` |
+| **Commit** | `b9c97e4` |
+| **Production note** | For production, use LDAPS (port 636) with a valid TLS certificate instead of disabling strong auth. |
+
+---
+
+### BUG-004 — Login fails: `Invalid username or password` (correct credentials)
+
+| Field | Detail |
+|-------|--------|
+| **Symptom** | `POST /api/auth/login` returns `"Invalid username or password"` even with correct credentials |
+| **Environment** | Node.js backend → ldapjs → Samba AD |
+| **Root cause** | The backend constructed the bind DN as `CN=testuser1,CN=Users,DC=corp,DC=local`. However, when a user is created with `samba-tool user create testuser1 --given-name="Test" --surname="User1"`, Samba sets the CN to the **display name** (`Test User1`), not the `sAMAccountName`. The actual DN was `CN=Test User1,CN=Users,DC=corp,DC=local`. The bind failed with `InvalidCredentialsError` because the DN didn't resolve. |
+| **Fix** | Switched the bind to **UPN format** (`testuser1@corp.local`). Active Directory supports UPN-based authentication natively, and Samba resolves the UPN to the correct account regardless of the display-name CN. |
+| **Files changed** | `backend/src/services/ldap.js` — `authenticateUser()` |
+| **Commit** | `b9c97e4` |
+
+---
+
+### BUG-005 — Runtime error: `ldap.escapeDN is not a function`
+
+| Field | Detail |
+|-------|--------|
+| **Symptom** | Backend logs `Login error: ldap.escapeDN is not a function` on every login attempt |
+| **Environment** | ldapjs v3.0.7 |
+| **Root cause** | `ldap.escapeDN()` was a utility exported by ldapjs v2. It was **removed** in ldapjs v3. The search filter used it to escape the username before embedding it in `(sAMAccountName=<value>)`. |
+| **Fix** | Replaced `ldap.escapeDN(username)` with a local `escapeFilter(str)` function that follows RFC 4515 escaping (backslash-encodes `\`, `*`, `(`, `)`, and `NUL`). |
+| **Files changed** | `backend/src/services/ldap.js` — added `escapeFilter()`, replaced all call sites |
+| **Commit** | `b9c97e4` |
+
+---
+
+### BUG-006 — Login succeeds but user object has all empty fields
+
+| Field | Detail |
+|-------|--------|
+| **Symptom** | Login returns a valid JWT but the user object is `{"email":"","department":"","givenName":"","surname":"","groups":[],"isAdmin":false}` with no `username` or `displayName` |
+| **Environment** | ldapjs v3.0.7 |
+| **Root cause** | The `entryToObject()` helper read `entry.object` (ldapjs v2 API) and `entry.pojo.attributes` treating it as a flat `{key: values}` map. In ldapjs v3: (a) `entry.object` returns `{}` empty, and (b) `entry.pojo.attributes` is an **array** of `{type: string, values: string[]}` objects — not a map. The function built an empty flat object, so every attribute lookup in `parseUser()` returned `undefined`. |
+| **Fix** | Updated `entryToObject()` to detect the ldapjs v3 shape: check `Array.isArray(entry.pojo.attributes)` and iterate the array — `flat[attr.type] = attr.values.length === 1 ? attr.values[0] : attr.values` — to produce the flat map that `parseUser()` expects. |
+| **Files changed** | `backend/src/services/ldap.js` — `entryToObject()` |
+| **Commit** | `b9c97e4` |
+
+---
+
+### BUG-007 — Samba image build fails: `Unable to locate package samba-tool`
+
+| Field | Detail |
+|-------|--------|
+| **Symptom** | `docker build` fails with `E: Unable to locate package samba-tool` |
+| **Environment** | Ubuntu 22.04 Docker image |
+| **Root cause** | `samba-tool` was listed as a separate apt package in the Dockerfile. On Ubuntu 22.04 it is not a standalone package — it is bundled inside the `samba` package and installed automatically. |
+| **Fix** | Removed `samba-tool` from the `apt-get install` list in the Dockerfile. |
+| **Files changed** | `docker/samba/Dockerfile` |
+| **Commit** | `b9c97e4` |
+
+---
+
 ## Notes
 
 - Samba AD is **not 100% Microsoft AD compatible** — advanced features like Group Policy Objects (GPO) and Windows domain joins may not work without extra configuration.
