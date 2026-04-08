@@ -1,0 +1,14 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Environment secrets
+backend/.env
+frontend/.env
+
+# Build output
+frontend/dist/
+
+# OS
+.DS_Store
+Thumbs.db

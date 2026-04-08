@@ -1,0 +1,54 @@
+version: "3.9"
+
+services:
+  samba:
+    build: ./docker/samba
+    container_name: samba-ad-dc
+    hostname: dc1
+    domainname: corp.local
+    environment:
+      SAMBA_DOMAIN: CORP
+      SAMBA_REALM: CORP.LOCAL
+      SAMBA_ADMIN_PASS: Admin@Corp#1234
+    volumes:
+      - samba-data:/var/lib/samba
+    networks:
+      ad-net:
+        aliases:
+          - dc1.corp.local
+    ports:
+      - "389:389"
+      - "636:636"
+    cap_add:
+      - SYS_ADMIN
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: login-backend
+    env_file: ./backend/.env
+    depends_on:
+      - samba
+    networks:
+      - ad-net
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: login-frontend
+    environment:
+      VITE_API_URL: http://localhost:3001
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+
+volumes:
+  samba-data:
+
+networks:
+  ad-net:
+    driver: bridge
