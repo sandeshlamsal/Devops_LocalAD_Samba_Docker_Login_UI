@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: samba-data
+  namespace: corp-local
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path   # k3s built-in provisioner
+  resources:
+    requests:
+      storage: 2Gi

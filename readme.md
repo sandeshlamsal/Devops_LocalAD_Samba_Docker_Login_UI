@@ -10,6 +10,29 @@ A fully containerized corporate login system using **Samba 4 Active Directory** 
 
 ---
 
+## Setup Checklist
+
+Use this as a quick reference before running the project for the first time.
+
+### Docker Compose (local dev)
+- [ ] Docker Desktop or Colima installed and running
+- [ ] `cd Devops_LocalAD_Samba_Docker_Login_UI`
+- [ ] `cp backend/.env.example backend/.env` and edit secrets
+- [ ] `docker compose up --build`
+- [ ] Wait ~30 s for Samba domain provisioning
+- [ ] Open `http://localhost:3000`
+
+### Kubernetes / k3d (cluster mode)
+- [ ] macOS with Homebrew installed
+- [ ] Run `./scripts/setup-cluster.sh` (installs Colima + k3d, starts cluster)
+- [ ] Add `127.0.0.1 corp.localhost` to `/etc/hosts`
+- [ ] Run `./scripts/build-and-import.sh` (builds and imports Docker images)
+- [ ] Run `./scripts/deploy.sh` (applies all K8s manifests)
+- [ ] Wait ~60 s for Samba provisioning on first boot
+- [ ] Open `http://corp.localhost`
+
+---
+
 ## Architecture
 
 ```
@@ -23,6 +46,171 @@ Samba AD DC (:389)
 ```
 
 All three services run as Docker containers on the same internal `ad-net` bridge network.
+
+---
+
+## Infrastructure Requirements
+
+### Minimum Host Machine
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| CPU | 2 cores | 4 cores |
+| RAM | 6 GB free | 8 GB free |
+| Disk | 10 GB free | 20 GB free |
+| OS | macOS 12+ | macOS 13+ |
+
+> **Linux users:** Colima is macOS-only. On Linux, run k3d directly after installing Docker. Skip `setup-cluster.sh` steps 1–2 and run `k3d cluster create corp-cluster --port '80:80@loadbalancer' --agents 1` directly.
+
+### Required Tools (auto-installed by `setup-cluster.sh`)
+| Tool | Version | Purpose |
+|------|---------|---------|
+| [Homebrew](https://brew.sh) | any | macOS package manager (must pre-exist) |
+| [Colima](https://github.com/abiosoft/colima) | ≥ 0.6 | Lightweight Docker/K8s VM for macOS |
+| [k3d](https://k3d.io) | ≥ 5.0 | Runs k3s (lightweight K8s) inside Docker containers |
+| [kubectl](https://kubernetes.io/docs/tasks/tools/) | ≥ 1.28 | Kubernetes CLI |
+| Docker CLI | ≥ 24 | Image building (provided by Colima) |
+
+### Port Map
+| Mode | Port | Service |
+|------|------|---------|
+| Docker Compose | `3000` | React frontend |
+| Docker Compose | `3001` | Node.js backend |
+| Docker Compose | `389` | Samba LDAP |
+| Kubernetes | `80` | Traefik → frontend (`/`) + backend (`/api`) |
+
+---
+
+## Running on Kubernetes (Colima + k3d)
+
+### How it works
+
+```
+  macOS Host
+  ┌────────────────────────────────────────────────────┐
+  │  Colima VM  (2 CPU / 4 GB RAM)                     │
+  │  ┌──────────────────────────────────────────────┐  │
+  │  │  k3d cluster "corp-cluster"                  │  │
+  │  │  ┌────────────────────────────────────────┐  │  │
+  │  │  │  Namespace: corp-local                 │  │  │
+  │  │  │                                        │  │  │
+  │  │  │  [StatefulSet]  samba-0     :389 LDAP  │  │  │
+  │  │  │  [Deployment]   backend     :3001 HTTP │  │  │
+  │  │  │  [Deployment]   frontend    :80  HTTP  │  │  │
+  │  │  │                                        │  │  │
+  │  │  │  [Ingress]  corp.localhost             │  │  │
+  │  │  │    /api  ──► backend:3001              │  │  │
+  │  │  │    /     ──► frontend:80               │  │  │
+  │  │  └────────────────────────────────────────┘  │  │
+  │  │  Traefik LoadBalancer ◄── port 80 on host ───┼──┼── browser
+  │  └──────────────────────────────────────────────┘  │
+  └────────────────────────────────────────────────────┘
+```
+
+Traffic flow for a browser request to `http://corp.localhost/api/auth/login`:
+1. macOS resolves `corp.localhost` → `127.0.0.1` (via `/etc/hosts`)
+2. Colima/k3d maps host port 80 → Traefik LoadBalancer inside the cluster
+3. Traefik matches the `/api` prefix → routes to `backend` Service (ClusterIP :3001)
+4. Backend makes an LDAP call to `samba` Service (ClusterIP :389) — resolved by K8s DNS
+5. Samba returns the authentication result; backend signs a JWT and responds
+
+### Step 1 — Start the cluster
+
+```bash
+./scripts/setup-cluster.sh
+```
+
+What it does:
+- Installs `colima`, `k3d`, `kubectl` via Homebrew (skips if already present)
+- Starts a Colima VM: **2 CPU, 4 GB RAM, 40 GB disk**, Docker runtime
+- Creates a k3d cluster named `corp-cluster` with **1 server + 1 agent node**
+- Maps host **port 80 → Traefik** inside the cluster
+
+### Step 2 — Add the hostname (one-time)
+
+```bash
+echo "127.0.0.1  corp.localhost" | sudo tee -a /etc/hosts
+```
+
+### Step 3 — Build and import images
+
+```bash
+./scripts/build-and-import.sh
+```
+
+What it does:
+- Builds `corp-samba:latest` from `docker/samba/`
+- Builds `corp-backend:latest` from `backend/`
+- Builds `corp-frontend:k8s` from `frontend/` with `VITE_API_URL=http://corp.localhost`
+  (Vite bakes this URL into the React bundle at build time so the browser knows where to call the API)
+- Imports all three images into the k3d cluster with `k3d image import`
+  (this is why manifests use `imagePullPolicy: Never` — no registry needed)
+
+### Step 4 — Deploy
+
+```bash
+./scripts/deploy.sh
+```
+
+What it does:
+- `kubectl apply` on all manifests under `k8s/` in dependency order
+- Waits up to 3 minutes for all pods to reach `Ready` state
+- Prints a summary of running resources and the Ingress
+
+### Step 5 — Verify
+
+```bash
+# All pods should show Running/Ready
+kubectl get pods -n corp-local
+
+# API health check through Traefik
+curl http://corp.localhost/api/health
+
+# Login test
+curl -s -X POST http://corp.localhost/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"testuser1","password":"User@Corp#1"}' | jq .
+
+# Open the app
+open http://corp.localhost
+```
+
+### Teardown
+
+```bash
+./scripts/teardown.sh   # deletes cluster + stops Colima VM
+```
+
+> **Warning:** Teardown destroys all cluster state including Samba's provisioned AD. The next `deploy.sh` will re-provision from scratch.
+
+---
+
+### K8s File Reference
+
+```
+k8s/
+├── namespace.yaml              Namespace "corp-local" + privileged PSA label (for SYS_ADMIN)
+├── samba/
+│   ├── pvc.yaml                2 Gi PersistentVolumeClaim (local-path provisioner)
+│   ├── statefulset.yaml        Samba AD DC — StatefulSet, SYS_ADMIN cap, readiness probe
+│   └── service.yaml            ClusterIP — ports 389 (LDAP), 636 (LDAPS), 88 (Kerberos)
+├── backend/
+│   ├── configmap.yaml          Non-secret env vars (LDAP_URL, BASE_DN, PORT)
+│   ├── secret.yaml             Sensitive env vars (LDAP_ADMIN_PASS, JWT_SECRET)
+│   ├── deployment.yaml         Node.js backend — readiness + liveness on /api/health
+│   └── service.yaml            ClusterIP — port 3001
+├── frontend/
+│   ├── deployment.yaml         nginx serving the built React SPA
+│   └── service.yaml            ClusterIP — port 80
+└── ingress.yaml                Traefik Ingress — /api → backend, / → frontend
+```
+
+### Why StatefulSet for Samba?
+
+| Concern | Why it matters for Samba |
+|---------|--------------------------|
+| Stable hostname | Samba embeds the machine hostname in Kerberos keytabs and the AD database at provision time — if the hostname changes on restart, Kerberos breaks |
+| Ordered startup | StatefulSet guarantees pod-0 starts before replicas; prevents split-brain if ever scaled |
+| Persistent storage | AD data lives in `/var/lib/samba` — a regular Deployment would lose it on pod restart without explicit volume binding |
 
 ---
 

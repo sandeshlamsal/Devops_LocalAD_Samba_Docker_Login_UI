@@ -1,5 +1,10 @@
 FROM node:20-alpine AS build
 
+# Allow overriding the API base URL at build time.
+# Default works for docker-compose; pass --build-arg VITE_API_URL=http://corp.localhost for K8s.
+ARG VITE_API_URL=http://localhost:3001
+ENV VITE_API_URL=$VITE_API_URL
+
 WORKDIR /app
 
 COPY package.json ./

@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: corp-local
+data:
+  # K8s DNS resolves "samba" to the ClusterIP of the samba Service in the same namespace
+  LDAP_URL: "ldap://samba"
+  LDAP_BASE_DN: "DC=corp,DC=local"
+  LDAP_ADMIN_DN: "CN=Administrator,CN=Users,DC=corp,DC=local"
+  PORT: "3001"

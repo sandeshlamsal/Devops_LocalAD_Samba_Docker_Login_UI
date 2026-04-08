@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: samba
+  namespace: corp-local
+spec:
+  serviceName: samba          # must match the headless/ClusterIP service name
+  replicas: 1
+  selector:
+    matchLabels:
+      app: samba
+  template:
+    metadata:
+      labels:
+        app: samba
+    spec:
+      hostname: dc1           # Samba uses this as the NetBIOS/Kerberos machine name
+      subdomain: samba        # pod FQDN: dc1.samba.corp-local.svc.cluster.local
+      containers:
+        - name: samba
+          image: corp-samba:latest
+          imagePullPolicy: Never    # image was imported via k3d image import
+          env:
+            - name: SAMBA_DOMAIN
+              value: "CORP"
+            - name: SAMBA_REALM
+              value: "CORP.LOCAL"
+            - name: SAMBA_ADMIN_PASS
+              value: "Admin@Corp#1234"
+          ports:
+            - containerPort: 389
+              name: ldap
+            - containerPort: 636
+              name: ldaps
+            - containerPort: 88
+              name: kerberos
+            - containerPort: 445
+              name: smb
+          securityContext:
+            capabilities:
+              add:
+                - SYS_ADMIN    # required for Samba domain provisioning
+          volumeMounts:
+            - name: samba-data
+              mountPath: /var/lib/samba
+          readinessProbe:
+            tcpSocket:
+              port: 389
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: 389
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: samba-data
+          persistentVolumeClaim:
+            claimName: samba-data

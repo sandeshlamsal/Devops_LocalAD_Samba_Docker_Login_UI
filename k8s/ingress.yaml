@@ -1,0 +1,31 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: corp-ingress
+  namespace: corp-local
+  annotations:
+    # Traefik strips the /api prefix before forwarding to backend.
+    # The backend routes are already mounted at /api/... so we do NOT strip.
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: corp.localhost
+      http:
+        paths:
+          # /api must be listed FIRST — Traefik evaluates rules top-down
+          # and the catch-all "/" would swallow /api requests otherwise.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 3001
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
