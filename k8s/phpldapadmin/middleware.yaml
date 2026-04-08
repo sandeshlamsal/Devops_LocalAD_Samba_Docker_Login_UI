@@ -1,0 +1,9 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-ldapadmin
+  namespace: corp-local
+spec:
+  stripPrefix:
+    prefixes:
+      - /ldapadmin

@@ -23,6 +23,9 @@ kubectl apply -f "$ROOT/k8s/backend/"
 step "Applying Frontend (Deployment + Service)"
 kubectl apply -f "$ROOT/k8s/frontend/"
 
+step "Applying phpLDAPadmin (Deployment + Service)"
+kubectl apply -f "$ROOT/k8s/phpldapadmin/"
+
 step "Applying Ingress"
 kubectl apply -f "$ROOT/k8s/ingress.yaml"
 
@@ -51,7 +54,8 @@ kubectl get ingress -n "$NS"
 
 echo
 echo "Stack is up. Access the app:"
-echo "  http://corp.localhost:8080"
+echo "  http://corp.localhost:8080          ← React login UI"
+echo "  http://corp.localhost:8080/ldapadmin ← phpLDAPadmin (LDAP web UI)"
 echo
 echo "If corp.localhost doesn't resolve, add this line to /etc/hosts:"
 echo "  127.0.0.1  corp.localhost"

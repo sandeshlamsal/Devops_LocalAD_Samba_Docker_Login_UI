@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: phpldapadmin
+  namespace: corp-local
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: phpldapadmin
+  template:
+    metadata:
+      labels:
+        app: phpldapadmin
+    spec:
+      containers:
+        - name: phpldapadmin
+          image: osixia/phpldapadmin:0.9.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          env:
+            # Plain LDAP to samba service in same namespace
+            - name: PHPLDAPADMIN_LDAP_HOSTS
+              value: "samba"
+            # Disable HTTPS inside the container — Traefik handles TLS termination
+            - name: PHPLDAPADMIN_HTTPS
+              value: "false"

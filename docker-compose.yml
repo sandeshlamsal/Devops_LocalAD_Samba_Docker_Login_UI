@@ -47,6 +47,20 @@ services:
       - "3000:80"
     restart: unless-stopped
 
+  phpldapadmin:
+    image: osixia/phpldapadmin:0.9.0
+    container_name: phpldapadmin
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: samba
+      PHPLDAPADMIN_HTTPS: "false"
+    depends_on:
+      - samba
+    networks:
+      - ad-net
+    ports:
+      - "8090:80"
+    restart: unless-stopped
+
 volumes:
   samba-data:
 

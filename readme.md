@@ -188,8 +188,9 @@ curl -s -X POST http://corp.localhost/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"testuser1","password":"User@Corp#1"}' | jq .
 
-# Open the app
-open http://corp.localhost
+# Open the app and LDAP admin UI
+open http://corp.localhost:8080              # React login UI
+open http://corp.localhost:8080/ldapadmin   # phpLDAPadmin
 ```
 
 ### Teardown
@@ -219,6 +220,11 @@ k8s/
 ├── frontend/
 │   ├── deployment.yaml         nginx serving the built React SPA
 │   └── service.yaml            ClusterIP — port 80
+├── phpldapadmin/
+│   ├── deployment.yaml         osixia/phpldapadmin — LDAP web UI, plain HTTP
+│   ├── service.yaml            ClusterIP — port 80
+│   ├── middleware.yaml         Traefik stripPrefix middleware (strips /ldapadmin before forwarding)
+│   └── ingress.yaml            Dedicated Ingress for /ldapadmin → phpldapadmin with middleware ref
 └── ingress.yaml                Traefik Ingress — /api → backend, / → frontend
 ```
 
@@ -243,8 +249,9 @@ docker compose up --build
 
 # 3. Wait ~30 seconds for Samba to provision the domain on first boot
 
-# 4. Open the app
-open http://localhost:3000
+# 4. Open the app and LDAP admin UI
+open http://localhost:3000       # React login UI
+open http://localhost:8090       # phpLDAPadmin
 ```
 
 ---
@@ -257,6 +264,93 @@ open http://localhost:3000
 | `adminuser` | `Admin@Corp#1` | Domain Admin |
 | `testuser1` | `User@Corp#1` | Regular user |
 | `testuser2` | `User@Corp#2` | Regular user |
+
+---
+
+## Managing Samba AD Users & Groups
+
+There are three ways to manage users and groups in this Samba 4 AD environment:
+
+| Option | Interface | Best For |
+|--------|-----------|----------|
+| **1. React Admin Panel** | Web UI at `/admin` | Day-to-day CRUD via the built app |
+| **2. samba-tool CLI** | `kubectl exec` into the samba pod | Scripting, bulk ops, debugging |
+| **3. phpLDAPadmin** ✅ | Web UI at `/ldapadmin` | Full LDAP tree inspection and raw attribute edits |
+
+**We chose phpLDAPadmin** — it gives direct visibility into the raw LDAP tree (all object classes, attributes, OUs, groups) without needing CLI access. Useful when you want to verify what Samba actually stored, browse AD structure, or make low-level attribute changes the app UI doesn't expose.
+
+### Option 1 — React Admin Panel
+
+Built into this project. Accessible at `http://corp.localhost:8080/admin` after logging in as an admin user (`adminuser` or `Administrator`).
+
+Supports: list users, create user, update display name / email, delete user, change own password.
+
+### Option 2 — samba-tool CLI
+
+```bash
+# Exec into the Samba pod
+kubectl exec -it samba-0 -n corp-local -- bash
+
+# List all users
+samba-tool user list
+
+# Show a user's details
+samba-tool user show testuser1
+
+# Create a user
+samba-tool user create newuser 'Pass@Word#1'
+
+# Delete a user
+samba-tool user delete newuser
+
+# Reset a password
+samba-tool user setpassword testuser1 --newpassword='NewPass@1'
+
+# List groups
+samba-tool group list
+
+# Add user to group
+samba-tool group addmembers "Domain Admins" newuser
+```
+
+### Option 3 — phpLDAPadmin (chosen)
+
+phpLDAPadmin provides a full-featured web interface for browsing and managing the Samba AD LDAP tree (users, groups, OUs, attributes).
+
+### Access URLs
+
+| Environment | URL |
+|-------------|-----|
+| Kubernetes (k3d) | `http://corp.localhost:8080/ldapadmin` |
+| Docker Compose | `http://localhost:8090` |
+
+### Login
+
+On the phpLDAPadmin login screen:
+
+1. **Login DN:** `cn=Administrator,cn=Users,dc=corp,dc=local`
+2. **Password:** `Admin@Corp#1234`
+3. Click **Authenticate**
+
+> The login page shows the LDAP server as `samba` (resolved by K8s/Docker DNS).  
+> Do **not** use the UPN format (`Administrator@corp.local`) here — phpLDAPadmin requires a full DN.
+
+### What You Can Do
+
+| Action | How |
+|--------|-----|
+| Browse the LDAP tree | Expand `dc=corp,dc=local` → `cn=Users` |
+| View user attributes | Click a user object (e.g. `cn=Test User1`) |
+| Create a new user | Click **Create new entry** under `cn=Users` → choose `inetOrgPerson` or `user` |
+| Delete a user | Select the user → click **Delete this entry** |
+| Modify attributes | Click an attribute value to edit inline |
+| View groups | Expand `cn=Users` and look for `groupType` entries |
+
+### Notes
+
+- phpLDAPadmin uses plain LDAP (`ldap://samba:389`) — browsing and read/write work fine.
+- Password changes via phpLDAPadmin for Samba AD require writing `unicodePwd` (UTF-16LE encoded), which is complex in raw LDAP. Use the app's **Change Password** page or `samba-tool` CLI instead.
+- The `osixia/phpldapadmin:0.9.0` image is a public image — `imagePullPolicy: IfNotPresent` in K8s (not `Never`) so it is fetched from Docker Hub on first deploy.
 
 ---
 
