@@ -27,6 +27,7 @@ services:
     build: ./backend
     container_name: login-backend
     env_file: ./backend/.env
+    # LDAP_URL in .env must be ldaps://samba:636 — unicodePwd changes require TLS
     depends_on:
       - samba
     networks:

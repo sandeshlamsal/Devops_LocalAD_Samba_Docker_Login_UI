@@ -641,6 +641,20 @@ This section records every bug found during bring-up, its root cause, and the fi
 
 ---
 
+### BUG-008 — Password change succeeds but old password still works
+
+| Field | Detail |
+|-------|--------|
+| **Symptom** | `PUT /api/users/me/password` returns `"Password changed successfully"` but the previous password continues to authenticate |
+| **Environment** | Node.js backend → ldapjs → Samba AD (plain LDAP, port 389) |
+| **Root cause** | Two independent issues combined: (1) Microsoft AD specification prohibits `unicodePwd` writes over unencrypted LDAP. Samba enforces this — the modify call appears to succeed at the LDAP layer but the password is silently discarded. (2) Samba 4 intentionally keeps the N-1 (previous) password valid for a brief grace period after any successful change, to support cached credentials on domain clients. |
+| **Fix** | Changed `LDAP_URL` from `ldap://samba` (port 389) to `ldaps://samba:636` in `backend/.env`, `backend/.env.example`, `k8s/backend/configmap.yaml`, and `docker-compose.yml`. The backend already had `tlsOptions: { rejectUnauthorized: false }` to accept Samba's self-signed cert. Password changes now go over TLS and are committed by Samba. |
+| **Samba grace period (by design)** | After a successful password change, Samba keeps the immediately previous password (N-1) valid for a short grace period. Passwords two changes back (N-2) are rejected. This is standard Active Directory behaviour and is not a bug in the application. |
+| **Files changed** | `backend/.env`, `backend/.env.example`, `k8s/backend/configmap.yaml`, `docker-compose.yml` |
+| **Commit** | `(next commit)` |
+
+---
+
 ### BUG-007 — Samba image build fails: `Unable to locate package samba-tool`
 
 | Field | Detail |
