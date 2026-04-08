@@ -10,6 +10,24 @@ A fully containerized corporate login system using **Samba 4 Active Directory** 
 
 ---
 
+## Cluster Policy
+
+**This project uses exactly one k3d cluster: `corp-cluster`.**
+
+No `dev`, `prod`, `qa`, or other clusters should coexist — port 80 can only be bound to one Traefik loadbalancer at a time. `setup-cluster.sh` automatically deletes any other clusters before creating `corp-cluster`.
+
+To check what clusters currently exist:
+```bash
+k3d cluster list
+```
+
+To manually remove a stale cluster:
+```bash
+k3d cluster delete <name>
+```
+
+---
+
 ## Setup Checklist
 
 Use this as a quick reference before running the project for the first time.
@@ -24,10 +42,10 @@ Use this as a quick reference before running the project for the first time.
 
 ### Kubernetes / k3d (cluster mode)
 - [ ] macOS with Homebrew installed
-- [ ] Run `./scripts/setup-cluster.sh` (installs Colima + k3d, starts cluster)
-- [ ] Add `127.0.0.1 corp.localhost` to `/etc/hosts`
-- [ ] Run `./scripts/build-and-import.sh` (builds and imports Docker images)
-- [ ] Run `./scripts/deploy.sh` (applies all K8s manifests)
+- [ ] Run `./scripts/setup-cluster.sh` — installs tools, **deletes other clusters**, creates `corp-cluster`
+- [ ] Add `127.0.0.1 corp.localhost` to `/etc/hosts` (one-time)
+- [ ] Run `./scripts/build-and-import.sh` — builds 3 Docker images, imports into `corp-cluster`
+- [ ] Run `./scripts/deploy.sh` — applies all K8s manifests
 - [ ] Wait ~60 s for Samba provisioning on first boot
 - [ ] Open `http://corp.localhost`
 

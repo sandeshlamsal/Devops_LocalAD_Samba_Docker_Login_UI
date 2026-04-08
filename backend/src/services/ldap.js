@@ -1,6 +1,12 @@
 const ldap = require("ldapjs");
 const cfg = require("../config/ldap");
 
+// ldapjs v3 does not expose escapeDN at the top level.
+// This escapes special characters in LDAP filter values per RFC 4515.
+function escapeFilter(str) {
+  return String(str).replace(/[\\*()\x00]/g, (c) => "\\" + c.charCodeAt(0).toString(16).padStart(2, "0"));
+}
+
 // Helper: create and bind an LDAP client, return { client, unbind }
 function createClient(dn, password) {
   return new Promise((resolve, reject) => {
@@ -21,13 +27,45 @@ function createClient(dn, password) {
   });
 }
 
-// Helper: run an ldap search, collect all entries
+// Helper: convert a ldapjs SearchEntry to a plain flat object.
+//
+// ldapjs v2: entry.object  → { sAMAccountName: "user", ... }  (flat, ready to use)
+// ldapjs v3: entry.pojo    → { objectName: "CN=...", attributes: { sAMAccountName: ["user"], ... } }
+//            entry.attributes → array of Attribute with .type and .values[]
+//
+// We normalise all three into a flat { attrName: valueOrArray } map.
+function entryToObject(entry) {
+  // ldapjs v2 path
+  if (entry.object && typeof entry.object === "object" && !Array.isArray(entry.object)) {
+    return entry.object;
+  }
+
+  // ldapjs v3: entry.pojo.attributes is an Array of { type: string, values: string[] }
+  if (entry.pojo && Array.isArray(entry.pojo.attributes)) {
+    const flat = { dn: entry.pojo.objectName };
+    for (const attr of entry.pojo.attributes) {
+      flat[attr.type] = attr.values.length === 1 ? attr.values[0] : attr.values;
+    }
+    return flat;
+  }
+
+  // Manual fallback: walk the attributes array
+  const obj = { dn: entry.objectName };
+  for (const attr of entry.attributes || []) {
+    const vals = (attr.values ?? attr.vals ?? []).map((v) =>
+      Buffer.isBuffer(v) ? v.toString("utf8") : String(v)
+    );
+    obj[attr.type] = vals.length === 1 ? vals[0] : vals;
+  }
+  return obj;
+}
+
 function search(client, base, opts) {
   return new Promise((resolve, reject) => {
     client.search(base, opts, (err, res) => {
       if (err) return reject(err);
       const entries = [];
-      res.on("searchEntry", (entry) => entries.push(entry.object));
+      res.on("searchEntry", (entry) => entries.push(entryToObject(entry)));
       res.on("error", reject);
       res.on("end", () => resolve(entries));
     });
@@ -58,9 +96,12 @@ function parseUser(entry) {
   };
 }
 
-// Authenticate a user by binding with their credentials
+// Authenticate a user by binding with their credentials.
+// Uses UPN format (user@realm) instead of full DN because Samba sets
+// CN = display name ("Test User1"), not sAMAccountName ("testuser1").
 async function authenticateUser(username, password) {
-  const userDN = `CN=${username},CN=Users,${cfg.baseDN}`;
+  const realm = cfg.baseDN.replace(/DC=/gi, "").replace(/,/g, ".");
+  const userDN = `${username}@${realm}`;   // e.g. testuser1@corp.local
   let conn;
   try {
     conn = await createClient(userDN, password);
@@ -72,7 +113,7 @@ async function authenticateUser(username, password) {
   // Fetch user details while we have the session
   const entries = await search(conn.client, cfg.usersDN, {
     scope: "sub",
-    filter: `(sAMAccountName=${ldap.escapeDN(username)})`,
+    filter: `(sAMAccountName=${escapeFilter(username)})`,
     attributes: ["sAMAccountName", "displayName", "cn", "mail", "memberOf", "department", "givenName", "sn"],
   });
 
@@ -86,7 +127,7 @@ async function getUserDetails(username) {
   try {
     const entries = await search(conn.client, cfg.usersDN, {
       scope: "sub",
-      filter: `(sAMAccountName=${ldap.escapeDN(username)})`,
+      filter: `(sAMAccountName=${escapeFilter(username)})`,
       attributes: ["sAMAccountName", "displayName", "cn", "mail", "memberOf", "department", "givenName", "sn"],
     });
     return entries.length ? parseUser(entries[0]) : null;
@@ -194,7 +235,7 @@ async function changePassword(username, oldPassword, newPassword) {
   if (!valid) throw new Error("Current password is incorrect");
 
   const conn = await createClient(cfg.adminDN, cfg.adminPass);
-  const userDN = `CN=${valid.displayName},CN=Users,${cfg.baseDN}`;
+  const userDN = `CN=${valid.displayName},CN=Users,${cfg.baseDN}`;  // displayName = CN (Samba sets CN to displayName)
   const encodedPassword = Buffer.from(`"${newPassword}"`, "utf16le");
 
   const change = new ldap.Change({

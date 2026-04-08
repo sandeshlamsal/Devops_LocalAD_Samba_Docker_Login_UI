@@ -19,9 +19,9 @@ docker build -t corp-samba:latest "$ROOT/docker/samba"
 step "Building corp-backend:latest"
 docker build -t corp-backend:latest "$ROOT/backend"
 
-step "Building corp-frontend:k8s  (VITE_API_URL=http://corp.localhost)"
+step "Building corp-frontend:k8s  (VITE_API_URL=http://corp.localhost:8080)"
 docker build \
-  --build-arg VITE_API_URL=http://corp.localhost \
+  --build-arg VITE_API_URL=http://corp.localhost:8080 \
   -t corp-frontend:k8s \
   "$ROOT/frontend"
 

@@ -4,12 +4,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y \
     samba \
-    samba-tool \
     krb5-user \
     winbind \
     dnsutils \
     net-tools \
     && rm -rf /var/lib/apt/lists/*
+# samba-tool is included in the samba package on Ubuntu 22.04
 
 # Remove default smb.conf so provision can create a fresh one
 RUN rm -f /etc/samba/smb.conf

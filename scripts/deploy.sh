@@ -51,7 +51,7 @@ kubectl get ingress -n "$NS"
 
 echo
 echo "Stack is up. Access the app:"
-echo "  http://corp.localhost"
+echo "  http://corp.localhost:8080"
 echo
 echo "If corp.localhost doesn't resolve, add this line to /etc/hosts:"
 echo "  127.0.0.1  corp.localhost"

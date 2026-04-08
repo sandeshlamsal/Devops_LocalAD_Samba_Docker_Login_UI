@@ -46,23 +46,37 @@ else
     --runtime docker
 fi
 
-# ---------- 3. Create k3d cluster --------------------------------------------
+# ---------- 3. Remove any other k3d clusters (keep corp-cluster only) --------
+step "Cleaning up other k3d clusters"
+
+while IFS= read -r name; do
+  name="$(echo "$name" | awk '{print $1}')"
+  [[ -z "$name" || "$name" == "NAME" ]] && continue
+  if [[ "$name" != "$CLUSTER_NAME" ]]; then
+    info "Deleting cluster: $name"
+    k3d cluster delete "$name"
+  else
+    info "Keeping cluster: $name"
+  fi
+done < <(k3d cluster list 2>/dev/null)
+
+# ---------- 4. Create corp-cluster if it does not exist ----------------------
 step "Creating k3d cluster: $CLUSTER_NAME"
 
-if k3d cluster list 2>/dev/null | grep -q "$CLUSTER_NAME"; then
+if k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}"; then
   info "Cluster '$CLUSTER_NAME' already exists — skipping creation."
 else
   k3d cluster create "$CLUSTER_NAME" \
-    --port "80:80@loadbalancer" \
-    --port "443:443@loadbalancer" \
+    --port "8080:80@loadbalancer" \
+    --port "8443:443@loadbalancer" \
     --agents 1
 fi
 
-# ---------- 4. Set kubectl context -------------------------------------------
+# ---------- 5. Set kubectl context -------------------------------------------
 step "Switching kubectl context to $CLUSTER_NAME"
 kubectl config use-context "k3d-${CLUSTER_NAME}"
 
-# ---------- 5. Verify --------------------------------------------------------
+# ---------- 6. Verify --------------------------------------------------------
 step "Cluster info"
 kubectl cluster-info
 echo
