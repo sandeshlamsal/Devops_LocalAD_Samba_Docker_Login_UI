@@ -83,5 +83,10 @@ echo
 kubectl get nodes -o wide
 
 echo
-echo "Setup complete. Next step:"
+echo "Setup complete."
+echo
+echo "If not already done, add all hostnames to /etc/hosts:"
+echo "  sudo sh -c '"'echo "127.0.0.1  corp.localhost ldapadmin.corp.localhost keycloak.corp.localhost localstack.corp.localhost" >> /etc/hosts'"'"
+echo
+echo "Next step:"
 echo "  ./scripts/build-and-import.sh"

@@ -1,0 +1,162 @@
+{
+  "realm": "corp",
+  "enabled": true,
+  "displayName": "Corp Local AD",
+  "displayNameHtml": "<b>Corp</b> Local AD",
+  "loginWithEmailAllowed": false,
+  "duplicateEmailsAllowed": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+
+  "components": {
+    "org.keycloak.storage.UserStorageProvider": [
+      {
+        "name": "samba-ad",
+        "providerId": "ldap",
+        "config": {
+          "enabled":                    ["true"],
+          "priority":                   ["0"],
+          "editMode":                   ["READ_ONLY"],
+          "importEnabled":              ["true"],
+          "syncRegistrations":          ["false"],
+          "vendor":                     ["ad"],
+          "usernameLDAPAttribute":      ["sAMAccountName"],
+          "rdnLDAPAttribute":           ["cn"],
+          "uuidLDAPAttribute":          ["objectGUID"],
+          "userObjectClasses":          ["person, organizationalPerson, user"],
+          "connectionUrl":              ["ldap://samba:389"],
+          "usersDn":                    ["CN=Users,DC=corp,DC=local"],
+          "authType":                   ["simple"],
+          "bindDn":                     ["CN=Administrator,CN=Users,DC=corp,DC=local"],
+          "bindCredential":             ["Admin@Corp#1234"],
+          "searchScope":                ["2"],
+          "startTls":                   ["false"],
+          "useTruststoreSpi":           ["ldapsOnly"],
+          "connectionPooling":          ["true"],
+          "pagination":                 ["true"],
+          "batchSizeForSync":           ["1000"],
+          "fullSyncPeriod":             ["3600"],
+          "changedSyncPeriod":          ["600"],
+          "cachePolicy":                ["DEFAULT"],
+          "allowKerberosAuthentication":["false"],
+          "debug":                      ["false"]
+        },
+        "subComponents": {
+          "org.keycloak.storage.ldap.mappers.LDAPStorageMapper": [
+            {
+              "name": "username",
+              "providerId": "user-attribute-ldap-mapper",
+              "config": {
+                "ldap.attribute":           ["sAMAccountName"],
+                "user.model.attribute":     ["username"],
+                "always.read.value.from.ldap": ["false"],
+                "is.mandatory.in.ldap":     ["true"],
+                "read.only":                ["true"]
+              }
+            },
+            {
+              "name": "first name",
+              "providerId": "user-attribute-ldap-mapper",
+              "config": {
+                "ldap.attribute":           ["givenName"],
+                "user.model.attribute":     ["firstName"],
+                "always.read.value.from.ldap": ["true"],
+                "is.mandatory.in.ldap":     ["false"],
+                "read.only":                ["true"]
+              }
+            },
+            {
+              "name": "last name",
+              "providerId": "user-attribute-ldap-mapper",
+              "config": {
+                "ldap.attribute":           ["sn"],
+                "user.model.attribute":     ["lastName"],
+                "always.read.value.from.ldap": ["true"],
+                "is.mandatory.in.ldap":     ["false"],
+                "read.only":                ["true"]
+              }
+            },
+            {
+              "name": "email",
+              "providerId": "user-attribute-ldap-mapper",
+              "config": {
+                "ldap.attribute":           ["mail"],
+                "user.model.attribute":     ["email"],
+                "always.read.value.from.ldap": ["false"],
+                "is.mandatory.in.ldap":     ["false"],
+                "read.only":                ["true"]
+              }
+            },
+            {
+              "name": "groups",
+              "providerId": "group-ldap-mapper",
+              "config": {
+                "mode":                     ["READ_ONLY"],
+                "membership.attribute.type":["DN"],
+                "membership.ldap.attribute":["member"],
+                "membership.user.ldap.attribute": ["dn"],
+                "group.name.ldap.attribute":["cn"],
+                "group.object.classes":     ["group"],
+                "groups.dn":               ["CN=Users,DC=corp,DC=local"],
+                "groups.path":             ["/"],
+                "drop.non.existing.groups.during.sync": ["false"],
+                "preserve.group.inheritance": ["true"],
+                "ignore.missing.groups":    ["false"],
+                "user.roles.retrieve.strategy": ["LOAD_GROUPS_BY_MEMBER_ATTRIBUTE"],
+                "memberof.ldap.attribute":  ["memberOf"]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "clients": [
+    {
+      "clientId": "aws-saml-client",
+      "name": "AWS IAM Identity Center (SAML)",
+      "description": "SAML 2.0 client — plug in your real AWS SSO ACS URL when ready",
+      "enabled": false,
+      "protocol": "saml",
+      "frontchannelLogout": true,
+      "attributes": {
+        "saml.assertion.signature":           "true",
+        "saml.authnstatement":                "true",
+        "saml_assertion_consumer_url_post":   "https://signin.aws.amazon.com/saml",
+        "saml_idp_initiated_sso_url_name":    "aws",
+        "saml.server.signature":              "true",
+        "saml.signature.algorithm":           "RSA_SHA256",
+        "saml.client.signature":              "false",
+        "saml.force.post.binding":            "true",
+        "saml.encrypt":                       "false"
+      },
+      "redirectUris": [
+        "https://signin.aws.amazon.com/saml"
+      ],
+      "protocolMappers": [
+        {
+          "name": "email",
+          "protocol": "saml",
+          "protocolMapper": "saml-user-attribute-mapper",
+          "config": {
+            "attribute.nameformat": "Basic",
+            "user.attribute":       "email",
+            "attribute.name":       "https://aws.amazon.com/SAML/Attributes/RoleSessionName"
+          }
+        },
+        {
+          "name": "username",
+          "protocol": "saml",
+          "protocolMapper": "saml-user-property-mapper",
+          "config": {
+            "attribute.nameformat": "Basic",
+            "user.attribute":       "username",
+            "attribute.name":       "NameID"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -61,8 +61,59 @@ services:
       - "8090:80"
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # Keycloak — SAML/OIDC identity provider federating Samba AD via LDAP.
+  # Simulates AWS IAM Identity Center's "external IdP" flow locally.
+  # Admin UI: http://localhost:8080  (admin / admin)
+  # Realm pre-configured: corp  (LDAP sync → samba:389)
+  # ---------------------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: keycloak
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_PORT: "8080"
+      KC_LOG_LEVEL: "INFO"
+    volumes:
+      - ./docker/keycloak:/opt/keycloak/data/import
+    depends_on:
+      - samba
+    networks:
+      - ad-net
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # LocalStack — local AWS cloud emulator (community/free tier).
+  # Emulates: IAM, STS, S3 — enough to test policy logic without real AWS.
+  # Endpoint: http://localhost:4566
+  # Use: aws --endpoint-url=http://localhost:4566 iam list-users
+  # Note: IAM Identity Center (SSO) requires LocalStack Pro — not included here.
+  # ---------------------------------------------------------------------------
+  localstack:
+    image: localstack/localstack:3.8
+    container_name: localstack
+    environment:
+      SERVICES: iam,sts,s3
+      ACTIVATE_PRO: "0"
+      DEBUG: "0"
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - localstack-data:/var/lib/localstack
+    networks:
+      - ad-net
+    ports:
+      - "4566:4566"
+    restart: unless-stopped
+
 volumes:
   samba-data:
+  localstack-data:
 
 networks:
   ad-net:

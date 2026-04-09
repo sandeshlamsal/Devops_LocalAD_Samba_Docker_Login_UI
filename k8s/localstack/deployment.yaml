@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: localstack
+  namespace: corp-local
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: localstack
+  template:
+    metadata:
+      labels:
+        app: localstack
+    spec:
+      containers:
+        - name: localstack
+          image: localstack/localstack:3.8
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SERVICES
+              value: iam,sts,s3
+            - name: ACTIVATE_PRO
+              value: "0"
+            - name: DEBUG
+              value: "0"
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+          ports:
+            - containerPort: 4566
+          readinessProbe:
+            httpGet:
+              path: /_localstack/health
+              port: 4566
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 6
