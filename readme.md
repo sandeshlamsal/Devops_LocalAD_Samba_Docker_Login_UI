@@ -1444,3 +1444,99 @@ aws --endpoint-url=http://localhost:4566 iam get-group --group-name AppUsers
 - Password changes via `unicodePwd` require LDAPS (port 636). Never use plain LDAP for password operations in production.
 - JWTs are stored in `localStorage`. For production, use `httpOnly` cookies to protect against XSS.
 - The `sandesh` user was created with AD password complexity temporarily disabled — `samba-tool domain passwordsettings set --complexity=off/on`.
+
+---
+
+## Session Summary — 2026-04-09
+
+### What Was Built This Session
+
+Starting point: working Samba AD + React/Node login UI + phpLDAPadmin on k3d.
+
+Goal: add Keycloak (SAML/OIDC identity federation) and LocalStack (local AWS IAM simulation) and wire them to Samba AD.
+
+---
+
+### Phase 1 — Design & Planning
+
+- Discussed AWS IAM Identity Center sync options:
+  - **Option 1**: Keycloak + SAML (recommended for local dev)
+  - **Option 2**: Identity Store API scripted sync
+  - **Option 3**: AD Connector + Site-to-Site VPN (enterprise, heavy)
+- Explained full AD Connector architecture with VPN tunnel diagram
+- Explained Keycloak concepts: Realm, User Federation, Clients, Mappers, OIDC vs SAML
+- Designed the local learning stack layered approach (free → cheap → time-boxed)
+
+---
+
+### Phase 2 — Implementation
+
+**Files created:**
+
+| File | Purpose |
+|------|---------|
+| `docker/keycloak/realm-corp.json` | Keycloak realm auto-import: LDAP federation + SAML client |
+| `k8s/keycloak/configmap.yaml` | Realm JSON as ConfigMap for k3d |
+| `k8s/keycloak/deployment.yaml` | Keycloak 24 pod with realm import on startup |
+| `k8s/keycloak/service.yaml` | ClusterIP service |
+| `k8s/keycloak/ingress.yaml` | Traefik ingress → `keycloak.corp.localhost` |
+| `k8s/localstack/deployment.yaml` | LocalStack 3.8 community (IAM, STS, S3) |
+| `k8s/localstack/service.yaml` | ClusterIP service |
+| `k8s/localstack/ingress.yaml` | Traefik ingress → `localstack.corp.localhost` |
+| `scripts/sync-ad-to-localstack.sh` | AD → LocalStack IAM sync (bash 3.2 compatible) |
+
+**Files modified:**
+
+| File | Change |
+|------|--------|
+| `docker-compose.yml` | Added keycloak + localstack services |
+| `scripts/deploy.sh` | Added keycloak + localstack manifest apply steps |
+| `scripts/setup-cluster.sh` | Added all /etc/hosts entries to post-setup output |
+| `readme.md` | Keycloak deep-dive, LocalStack section, issues, sync results |
+
+---
+
+### Phase 3 — Debugging (8 issues resolved)
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 1 | `localstack:latest` requires Pro license | Pinned to `3.8`, added `ACTIVATE_PRO=0` |
+| 2 | Keycloak crash: `"providerType"` not valid in realm import | Removed field from realm JSON |
+| 3 | `mapfile` not in macOS bash 3.2 | Replaced with `while IFS= read -r` loops |
+| 4 | `set -eo pipefail` kills script on `grep` no-match | Removed pipeline strict flags |
+| 5 | `awk '{print $2}'` truncates multi-word AD names | Replaced with `sed 's/^attr: //'` |
+| 6 | `AWS="cmd --flag"` string not callable in zsh | Replaced with `lsaws()` shell function |
+| 7 | `set -u` treats shell function as unbound variable | Removed `set -u` |
+| 8 | Process substitution `< <(...)` unreliable in bash 3.2 | Replaced with tempfile pattern |
+
+---
+
+### Phase 4 — Verified End State
+
+All 6 pods `1/1 Running` in `corp-local` namespace:
+
+```
+samba-0          — Samba 4 AD DC
+backend          — Node.js LDAP auth API
+frontend         — React login UI
+phpldapadmin     — LDAP browser
+keycloak         — SAML/OIDC IdP (realm: corp, federated from samba)
+localstack       — Fake AWS (IAM ✓  STS ✓  S3 ✓  edition: community)
+```
+
+AD → LocalStack IAM sync result:
+
+```
+IAM Users:   adminuser, testuser1, testuser2
+IAM Groups:  AppUsers  (members: testuser1, testuser2, policy: ReadOnlyAccess)
+```
+
+---
+
+### What's Next (future sessions)
+
+- [ ] Log into Keycloak with an AD user (`testuser1` / `User@Corp#1`) via the corp realm
+- [ ] Enable `aws-saml-client` in Keycloak and connect to real AWS IAM Identity Center
+- [ ] Write IAM policies in LocalStack scoped to synced groups and test with `aws iam simulate-principal-policy`
+- [ ] Add more custom AD groups via phpLDAPadmin and re-run sync
+- [ ] Explore SCIM auto-provisioning from Keycloak to a real AWS org
