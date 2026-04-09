@@ -762,6 +762,42 @@ This section records every bug found during bring-up, its root cause, and the fi
 
 ---
 
+### BUG-009 — phpLDAPadmin: page loads but CSS and images are broken
+
+| Field | Detail |
+|-------|--------|
+| **Symptom** | `http://corp.localhost:8080/ldapadmin` loads but shows raw unstyled text — logo, icons, and stylesheets all fail to load (broken image icons in browser) |
+| **Environment** | phpLDAPadmin behind Traefik at `/ldapadmin` sub-path |
+| **Root cause** | phpLDAPadmin generates all asset URLs as absolute paths from root (e.g. `/images/`, `/css/`). With `stripPrefix` middleware removing `/ldapadmin`, the app serves HTML from `/` but all asset URLs still point to `/images/...` — Traefik routes those to the React frontend catch-all, not phpLDAPadmin. |
+| **Fix** | Set `PHPLDAPADMIN_SERVER_PATH=/ldapadmin` env var in the deployment. This tells phpLDAPadmin to prefix all generated URLs with `/ldapadmin/`, so Traefik correctly routes asset requests back to phpLDAPadmin. Removed the `stripPrefix` middleware — no longer needed since the app handles the prefix itself. |
+| **Files changed** | `k8s/phpldapadmin/deployment.yaml`, `k8s/phpldapadmin/ingress.yaml` |
+
+---
+
+### BUG-010 — phpLDAPadmin: `Invalid credentials (49)` with correct password
+
+| Field | Detail |
+|-------|--------|
+| **Symptom** | Entering `Administrator` / `Admin@Corp#1234` on the phpLDAPadmin login screen returns: `Unable to connect to LDAP server samba — Error: Invalid credentials (49)` |
+| **Environment** | phpLDAPadmin login form, default configuration |
+| **Root cause** | phpLDAPadmin's login DN field requires a full LDAP Distinguished Name (e.g. `cn=Administrator,cn=Users,dc=corp,dc=local`). Entering just `Administrator` fails with LDAP error 49 (invalidCredentials) because it is not a valid DN format for a simple bind. |
+| **Fix** | Mounted a custom `config.php` via ConfigMap that sets `$servers->setValue('login', 'bind_id', 'cn=Administrator,cn=Users,dc=corp,dc=local')`. This pre-fills the Login DN field so users only need to enter the password. |
+| **Files changed** | `k8s/phpldapadmin/configmap.yaml` (new), `k8s/phpldapadmin/deployment.yaml` |
+
+---
+
+### BUG-011 — phpLDAPadmin: `403 Forbidden` after mounting custom config
+
+| Field | Detail |
+|-------|--------|
+| **Symptom** | After adding the ConfigMap mount, `http://corp.localhost:8080/ldapadmin/` returns `403 Forbidden`. Apache logs show: `DocumentRoot [/var/www/phpldapadmin/htdocs] does not exist` and `client denied by server configuration` |
+| **Environment** | K8s deployment with emptyDir volume mounted at `/var/www/phpldapadmin/config` |
+| **Root cause** | The `osixia/phpldapadmin` startup script bootstraps the app by copying files from `/var/www/phpldapadmin_bootstrap/` into `/var/www/phpldapadmin/` — but only when that directory is empty. Mounting an emptyDir at `/var/www/phpldapadmin/config` made the directory non-empty (it contained `config/`), so the bootstrap copy was skipped. As a result `htdocs/`, `index.php`, templates etc. were never created, leaving only the `config/` mount and causing Apache's 403. |
+| **Fix** | Removed the emptyDir volume mount. Instead, mounted the ConfigMap read-only at `/pla-config` and used a `lifecycle.postStart` hook to `cp /pla-config/config.php` into the live config path after the startup script finishes bootstrapping. A `sleep 12` inside the hook ensures the bootstrap completes before the copy runs. |
+| **Files changed** | `k8s/phpldapadmin/deployment.yaml` |
+
+---
+
 ## Notes
 
 - Samba AD is **not 100% Microsoft AD compatible** — advanced features like Group Policy Objects (GPO) and Windows domain joins may not work without extra configuration.

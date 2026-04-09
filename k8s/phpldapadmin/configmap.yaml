@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: phpldapadmin-config
+  namespace: corp-local
+data:
+  config.php: |
+    <?php
+    $config->custom->debug['level'] = 0;
+    $config->custom->debug['syslog'] = true;
+
+    $config->custom->jpeg['tmpdir'] = '/var/www/tmp';
+    $config->custom->session['blowfish'] = 'corp-local-lab-phpldapadmin-secret-key-2026';
+    $config->custom->appearance['hide_template_warning'] = true;
+    $config->custom->appearance['friendly_attrs'] = array(
+      'facsimileTelephoneNumber' => 'Fax',
+      'gid'                      => 'Group',
+      'mail'                     => 'Email',
+      'telephoneNumber'          => 'Telephone',
+      'uid'                      => 'User Name',
+      'userPassword'             => 'Password'
+    );
+
+    $servers = new Datastore();
+    $servers->newServer('ldap_pla');
+    $servers->setValue('server', 'name',    'Samba AD (corp.local)');
+    $servers->setValue('server', 'host',    'samba');
+    $servers->setValue('server', 'port',    389);
+    $servers->setValue('server', 'base',    array('dc=corp,dc=local'));
+    // Pre-fill the login DN so users only need to enter the password
+    $servers->setValue('login',  'bind_id', 'cn=Administrator,cn=Users,dc=corp,dc=local');
+    $servers->setValue('server', 'tls',     false);

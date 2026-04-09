@@ -20,9 +20,31 @@ spec:
           ports:
             - containerPort: 80
           env:
-            # Plain LDAP to samba service in same namespace
             - name: PHPLDAPADMIN_LDAP_HOSTS
               value: "samba"
-            # Disable HTTPS inside the container — Traefik handles TLS termination
             - name: PHPLDAPADMIN_HTTPS
               value: "false"
+            # Tell phpLDAPadmin its base path so assets use /ldapadmin/ prefix
+            - name: PHPLDAPADMIN_SERVER_PATH
+              value: "/ldapadmin"
+          # After startup completes, overwrite config.php with our pre-configured version.
+          # We use sleep 10 to let the startup script finish bootstrapping first,
+          # then cp from the ConfigMap (mounted read-only at /pla-config) into the live path.
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - |
+                    sleep 12 &&
+                    cp /pla-config/config.php /var/www/phpldapadmin/config/config.php &&
+                    chmod 400 /var/www/phpldapadmin/config/config.php &&
+                    chown www-data:www-data /var/www/phpldapadmin/config/config.php
+          volumeMounts:
+            - name: pla-config
+              mountPath: /pla-config
+      volumes:
+        - name: pla-config
+          configMap:
+            name: phpldapadmin-config
