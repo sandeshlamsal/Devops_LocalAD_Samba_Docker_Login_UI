@@ -252,19 +252,170 @@ open http://ldapadmin.corp.localhost:8080   # phpLDAPadmin
 ### Teardown
 
 ```bash
-./scripts/teardown.sh   # deletes cluster + stops Colima VM
+./scripts/teardown.sh
 ```
 
-> **Warning:** Teardown destroys all cluster state including Samba's provisioned AD. The next `deploy.sh` re-provisions from scratch and seeds fresh users.
+What it destroys:
+- k3d cluster `corp-cluster` — all pods, services, ingresses, PVCs, namespaces
+- Colima VM — the Docker daemon and all images built inside it
+- kubeconfig context for `corp-cluster`
 
-### Re-creating a Clean Cluster
+> **Everything is gone after teardown.** Samba AD data (users, passwords, groups) is lost. The next `deploy.sh` provisions a fresh domain and re-seeds the default users.
+
+> Git code is **not** affected — the repo on disk and on GitHub remains intact.
+
+---
+
+### Teardown & Full Recreation from Scratch
+
+Use this when you want a completely clean environment — new cluster, fresh AD, no leftover state.
+
+#### Step 1 — Destroy everything
 
 ```bash
-./scripts/teardown.sh          # delete cluster + stop Colima
-./scripts/setup-cluster.sh     # fresh Colima VM + corp-cluster
-./scripts/build-and-import.sh  # rebuild and import images
-./scripts/deploy.sh            # apply manifests
+./scripts/teardown.sh
+# Prompts: "Continue? [y/N]" → type y
 ```
+
+Verify it's clean:
+```bash
+k3d cluster list          # should show: no clusters
+colima status             # should show: not running
+kubectl config get-contexts  # should be empty
+```
+
+#### Step 2 — Clone (if starting on a new machine) or use existing code
+
+```bash
+# On a new machine:
+git clone https://github.com/sandeshlamsal/Devops_LocalAD_Samba_Docker_Login_UI
+cd Devops_LocalAD_Samba_Docker_Login_UI
+
+# On existing machine (already cloned):
+cd Devops_LocalAD_Samba_Docker_Login_UI
+git pull origin main       # get latest code
+```
+
+#### Step 3 — Add hostnames to `/etc/hosts` (one-time per machine)
+
+```bash
+# Check if already present
+grep "corp.localhost" /etc/hosts
+
+# If not present, add both:
+echo "127.0.0.1  corp.localhost" | sudo tee -a /etc/hosts
+echo "127.0.0.1  ldapadmin.corp.localhost" | sudo tee -a /etc/hosts
+```
+
+#### Step 4 — Create the cluster
+
+```bash
+./scripts/setup-cluster.sh
+```
+
+Expected output:
+```
+==> Checking / installing dependencies
+==> Starting Colima VM
+==> Deleting any existing k3d clusters
+==> Creating k3d cluster: corp-cluster
+kubectl cluster-info  ← shows the cluster is up
+```
+
+Verify:
+```bash
+k3d cluster list      # NAME: corp-cluster, SERVERS: 1/1, AGENTS: 1/1
+colima status         # colima is running
+kubectl get nodes     # 2 nodes Ready
+```
+
+#### Step 5 — Build Docker images and import into the cluster
+
+```bash
+./scripts/build-and-import.sh
+```
+
+What gets built:
+| Image | Source | Notes |
+|-------|--------|-------|
+| `corp-samba:latest` | `docker/samba/` | Ubuntu 22.04 + Samba 4 AD |
+| `corp-backend:latest` | `backend/` | Node.js + Express + ldapjs |
+| `corp-frontend:k8s` | `frontend/` | React + Vite, `VITE_API_URL` baked in |
+
+> phpLDAPadmin uses the public `osixia/phpldapadmin:0.9.0` image — it is pulled from Docker Hub automatically on first deploy, no build needed.
+
+Verify images are imported:
+```bash
+docker images | grep corp-   # shows corp-samba, corp-backend, corp-frontend
+```
+
+#### Step 6 — Deploy all manifests
+
+```bash
+./scripts/deploy.sh
+```
+
+Expected output:
+```
+==> Applying namespace
+==> Applying Samba
+==> Applying Backend
+==> Applying Frontend
+==> Applying phpLDAPadmin
+==> Applying Ingress
+==> Waiting for all pods to be ready (timeout 3 min)
+```
+
+> Samba takes **30–60 seconds** to provision the AD domain on first boot. If `kubectl wait` times out, wait another minute and run:
+> ```bash
+> kubectl wait --namespace corp-local --for=condition=ready pod --all --timeout=60s
+> ```
+
+#### Step 7 — Verify everything is running
+
+```bash
+# All pods 1/1 Running
+kubectl get pods -n corp-local
+
+# Expected:
+# NAME                            READY   STATUS    RESTARTS
+# samba-0                         1/1     Running   0
+# backend-xxxxx                   1/1     Running   0
+# frontend-xxxxx                  1/1     Running   0
+# phpldapadmin-xxxxx              1/1     Running   0
+
+# API health check
+curl http://corp.localhost:8080/api/health
+# Expected: {"status":"ok"}
+
+# Test login
+curl -s -X POST http://corp.localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"testuser1","password":"User@Corp#1"}' | jq .
+# Expected: { "token": "...", "user": { "username": "testuser1", ... } }
+```
+
+#### Step 8 — Open the apps
+
+```bash
+open http://corp.localhost:8080              # React login UI
+open http://ldapadmin.corp.localhost:8080   # phpLDAPadmin
+```
+
+Login credentials:
+- **React portal:** `testuser1` / `User@Corp#1`
+- **phpLDAPadmin:** DN pre-filled → password `Admin@Corp#1234`
+
+---
+
+### Quick Reference — All Scripts
+
+| Script | What it does | When to run |
+|--------|-------------|-------------|
+| `./scripts/setup-cluster.sh` | Install tools, start Colima, create k3d cluster | First time or after teardown |
+| `./scripts/build-and-import.sh` | Build Docker images, import into k3d | After code changes |
+| `./scripts/deploy.sh` | Apply all K8s manifests, wait for pods | After cluster setup or manifest changes |
+| `./scripts/teardown.sh` | Delete cluster, stop Colima | When done or starting clean |
 
 ---
 
