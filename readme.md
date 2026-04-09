@@ -43,7 +43,11 @@ Use this as a quick reference before running the project for the first time.
 ### Kubernetes / k3d (cluster mode)
 - [ ] macOS with Homebrew installed
 - [ ] Run `./scripts/setup-cluster.sh` — installs tools, **deletes other clusters**, creates `corp-cluster`
-- [ ] Add `127.0.0.1 corp.localhost` to `/etc/hosts` (one-time)
+- [ ] Add hostnames to `/etc/hosts` (one-time):
+  ```bash
+  echo "127.0.0.1  corp.localhost" | sudo tee -a /etc/hosts
+  echo "127.0.0.1  ldapadmin.corp.localhost" | sudo tee -a /etc/hosts
+  ```
 - [ ] Run `./scripts/build-and-import.sh` — builds 3 Docker images, imports into `corp-cluster`
 - [ ] Run `./scripts/deploy.sh` — applies all K8s manifests
 - [ ] Wait ~60 s for Samba provisioning on first boot
@@ -143,10 +147,11 @@ What it does:
 - Creates a k3d cluster named `corp-cluster` with **1 server + 1 agent node**
 - Maps host **port 80 → Traefik** inside the cluster
 
-### Step 2 — Add the hostname (one-time)
+### Step 2 — Add hostnames (one-time)
 
 ```bash
 echo "127.0.0.1  corp.localhost" | sudo tee -a /etc/hosts
+echo "127.0.0.1  ldapadmin.corp.localhost" | sudo tee -a /etc/hosts
 ```
 
 ### Step 3 — Build and import images
@@ -190,7 +195,7 @@ curl -s -X POST http://corp.localhost/api/auth/login \
 
 # Open the app and LDAP admin UI
 open http://corp.localhost:8080              # React login UI
-open http://corp.localhost:8080/ldapadmin   # phpLDAPadmin
+open http://ldapadmin.corp.localhost:8080   # phpLDAPadmin
 ```
 
 ### Teardown
@@ -223,8 +228,8 @@ k8s/
 ├── phpldapadmin/
 │   ├── deployment.yaml         osixia/phpldapadmin — LDAP web UI, plain HTTP
 │   ├── service.yaml            ClusterIP — port 80
-│   ├── middleware.yaml         Traefik stripPrefix middleware (strips /ldapadmin before forwarding)
-│   └── ingress.yaml            Dedicated Ingress for /ldapadmin → phpldapadmin with middleware ref
+│   ├── middleware.yaml         Traefik stripPrefix middleware (no longer active — kept for reference)
+│   └── ingress.yaml            Dedicated Ingress on host ldapadmin.corp.localhost → phpldapadmin
 └── ingress.yaml                Traefik Ingress — /api → backend, / → frontend
 ```
 
@@ -275,7 +280,7 @@ There are three ways to manage users and groups in this Samba 4 AD environment:
 |--------|-----------|----------|
 | **1. React Admin Panel** | Web UI at `/admin` | Day-to-day CRUD via the built app |
 | **2. samba-tool CLI** | `kubectl exec` into the samba pod | Scripting, bulk ops, debugging |
-| **3. phpLDAPadmin** ✅ | Web UI at `/ldapadmin` | Full LDAP tree inspection and raw attribute edits |
+| **3. phpLDAPadmin** ✅ | Web UI at `ldapadmin.corp.localhost:8080` | Full LDAP tree inspection and raw attribute edits |
 
 **We chose phpLDAPadmin** — it gives direct visibility into the raw LDAP tree (all object classes, attributes, OUs, groups) without needing CLI access. Useful when you want to verify what Samba actually stored, browse AD structure, or make low-level attribute changes the app UI doesn't expose.
 
@@ -321,8 +326,13 @@ phpLDAPadmin provides a full-featured web interface for browsing and managing th
 
 | Environment | URL |
 |-------------|-----|
-| Kubernetes (k3d) | `http://corp.localhost:8080/ldapadmin` |
+| Kubernetes (k3d) | `http://ldapadmin.corp.localhost:8080` |
 | Docker Compose | `http://localhost:8090` |
+
+> **One-time setup:** add `127.0.0.1  ldapadmin.corp.localhost` to `/etc/hosts`:
+> ```bash
+> echo "127.0.0.1  ldapadmin.corp.localhost" | sudo tee -a /etc/hosts
+> ```
 
 ### Login
 

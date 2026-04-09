@@ -24,9 +24,6 @@ spec:
               value: "samba"
             - name: PHPLDAPADMIN_HTTPS
               value: "false"
-            # Tell phpLDAPadmin its base path so assets use /ldapadmin/ prefix
-            - name: PHPLDAPADMIN_SERVER_PATH
-              value: "/ldapadmin"
           # After startup completes, overwrite config.php with our pre-configured version.
           # We use sleep 10 to let the startup script finish bootstrapping first,
           # then cp from the ConfigMap (mounted read-only at /pla-config) into the live path.

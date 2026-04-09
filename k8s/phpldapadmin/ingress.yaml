@@ -5,15 +5,15 @@ metadata:
   namespace: corp-local
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: web
-    # No stripPrefix needed — PHPLDAPADMIN_SERVER_PATH=/ldapadmin makes the app generate
-    # all asset URLs with /ldapadmin/ prefix, so Traefik forwards the path as-is.
 spec:
   ingressClassName: traefik
   rules:
-    - host: corp.localhost
+    # Separate hostname keeps LDAP admin UI completely independent from the React portal.
+    # Add "127.0.0.1 ldapadmin.corp.localhost" to /etc/hosts to resolve this.
+    - host: ldapadmin.corp.localhost
       http:
         paths:
-          - path: /ldapadmin
+          - path: /
             pathType: Prefix
             backend:
               service:
